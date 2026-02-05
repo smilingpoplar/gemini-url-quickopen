@@ -36,6 +36,11 @@ async function openGeminiWithCurrentTab() {
     const [tab] = await browserAPI.tabs.query({ active: true, currentWindow: true });
     const currentUrl = tab.url;
 
+    // 如果 URL 不是 http/https 开头，不执行任何操作
+    if (!currentUrl || !currentUrl.startsWith('http')) {
+      return;
+    }
+
     const result = await browserAPI.storage.sync.get(['urlPatterns']);
     const urlPatterns = result.urlPatterns || [];
 
