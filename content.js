@@ -1,4 +1,4 @@
-(function() {
+(function () {
   'use strict';
 
   const waitForElement = (selector, timeout = 10000) => {
@@ -28,7 +28,13 @@
   const delay = (ms) => new Promise(res => setTimeout(res, ms));
 
   const getQuery = () => {
-    return new URLSearchParams(window.location.search).get('q');
+    const url = new URL(window.location.href);
+    const q = url.searchParams.get('q');
+    if (q) {
+      url.searchParams.delete('q');
+      window.history.replaceState({}, '', url.toString());
+    }
+    return q;
   };
 
   const simulateInput = (elem, value) => {
@@ -37,10 +43,10 @@
   };
 
   const simulateEnter = (elem) => {
-    elem.dispatchEvent(new KeyboardEvent('keydown', { 
-      key: 'Enter', 
-      keyCode: 13, 
-      bubbles: true 
+    elem.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Enter',
+      keyCode: 13,
+      bubbles: true
     }));
   };
 
