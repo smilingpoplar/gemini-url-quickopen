@@ -228,6 +228,10 @@ async function openGeminiWithTab(tab) {
   const matchedResult = findMatchingGroup(currentUrl, config);
   const queryText = await buildGeminiQueryText(currentUrl, tabId, matchedResult);
 
+  await openPrerenderedGemini(queryText);
+}
+
+async function openPrerenderedGemini(queryText) {
   let targetTabId = await consumePrerenderTab();
 
   if (!targetTabId) {
@@ -235,21 +239,25 @@ async function openGeminiWithTab(tab) {
     targetTabId = newTab.id;
   }
 
-  const sendQueryToContentScript = async (attempt = 1) => {
-    try {
-      await browser.tabs.sendMessage(targetTabId, {
-        type: 'GEMINI_QUERY',
-        queryText
-      });
-    } catch (error) {
-      if (attempt < 10) {
-        await new Promise(resolve => setTimeout(resolve, 500));
-        await sendQueryToContentScript(attempt + 1);
-      }
-    }
-  };
+  if (queryText) {
+    await sendQueryToPrerenderTab(targetTabId, queryText);
+  }
 
-  await sendQueryToContentScript();
+  return targetTabId;
+}
+
+async function sendQueryToPrerenderTab(targetTabId, queryText, attempt = 1) {
+  try {
+    await browser.tabs.sendMessage(targetTabId, {
+      type: 'GEMINI_QUERY',
+      queryText
+    });
+  } catch (error) {
+    if (attempt < 10) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+      await sendQueryToPrerenderTab(targetTabId, queryText, attempt + 1);
+    }
+  }
 }
 
 async function openGeminiWithCurrentTab() {
@@ -279,6 +287,30 @@ browser.commands.onCommand.addListener(async (command) => {
   if (command === 'open-gemini') {
     await openGeminiWithCurrentTab();
   }
+});
+
+browser.webNavigation.onCommitted.addListener(async (details) => {
+  // Firefox 不支持预渲染机制，跳过此逻辑以避免无限循环
+  if (!IS_CHROME) return;
+
+  if (!details.url?.startsWith('https://gemini.google.com')) return;
+  if (details.frameId !== 0) return;
+
+  const prerenderIds = await getPrerenderIds();
+  if (details.tabId === prerenderIds.tabId) return;
+
+  const url = new URL(details.url);
+  const queryText = url.searchParams.get('q');
+
+  // 只有带 q 查询参数时才使用预渲染页面
+  if (!queryText) return;
+
+  const triggerTabId = details.tabId;
+
+  // 立即关闭 trigger tab，不等待 prerender 逻辑
+  void browser.tabs.remove(triggerTabId);
+
+  await openPrerenderedGemini(queryText);
 });
 
 createPrerenderTab();
