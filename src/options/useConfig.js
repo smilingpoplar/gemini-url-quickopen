@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { DEFAULT_PROMPT } from '../constants.js';
+import { exportToYaml, importFromYaml, downloadYaml, selectYamlFile } from './config-import-export.js';
 
 function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2);
@@ -209,6 +210,30 @@ export function useConfig() {
     });
   }, [saveConfig, showStatus]);
 
+  const exportConfig = useCallback(() => {
+    const yamlContent = exportToYaml(config);
+    const timestamp = new Date().toISOString().slice(0, 10);
+    downloadYaml(yamlContent, `rule-config-${timestamp}.yaml`);
+    showStatus('已导出');
+  }, [config, showStatus]);
+
+  const importConfig = useCallback(async () => {
+    try {
+      const yamlContent = await selectYamlFile();
+      const importedGroups = importFromYaml(yamlContent);
+      const defaultGroup = config.ruleGroups.find(g => g.isDefault);
+      const newConfig = {
+        ruleGroups: defaultGroup ? [defaultGroup, ...importedGroups] : importedGroups
+      };
+      await saveConfig(newConfig);
+      setConfig(newConfig);
+      showStatus('已导入');
+    } catch (error) {
+      console.error('Import failed:', error);
+      showStatus('导入失败');
+    }
+  }, [config, saveConfig, showStatus]);
+
   return {
     config,
     loading,
@@ -221,6 +246,8 @@ export function useConfig() {
     addRule,
     deleteRule,
     reorderGroups,
-    reorderRules
+    reorderRules,
+    exportConfig,
+    importConfig
   };
 }

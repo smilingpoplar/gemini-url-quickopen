@@ -30,7 +30,9 @@ export function App() {
     addRule,
     deleteRule,
     reorderGroups,
-    reorderRules
+    reorderRules,
+    exportConfig,
+    importConfig
   } = useConfig();
 
   const [activeId, setActiveId] = useState(null);
@@ -143,8 +145,16 @@ export function App() {
 
   return (
     <div className="container">
-      <h1>⚙️ 插件设置</h1>
-      <p className="subtitle">配置不同网址的prompt</p>
+      <div className="header">
+        <div className="header-title">
+          <h1>⚙️ 插件设置</h1>
+          <p className="subtitle">配置不同网址的prompt</p>
+        </div>
+        <div className="header-actions">
+          <button className="action-btn" onClick={importConfig}>导入</button>
+          <button className="action-btn" onClick={exportConfig}>导出</button>
+        </div>
+      </div>
       <p className="hint">提示：每个规则组包含一个prompt和多个网址规则（每个规则可选CSS选择器）；按规则组顺序匹配</p>
 
       <DndContext
