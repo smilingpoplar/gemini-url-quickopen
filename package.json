@@ -1,5 +1,5 @@
 {
-  "name": "gemini-url-quickopen",
+  "name": "gemini-quickopen",
   "version": "1.0.0",
   "description": "点击图标即可将当前网页 URL 发送到 Gemini 进行分析。",
   "scripts": {
