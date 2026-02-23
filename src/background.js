@@ -8,17 +8,26 @@ const GEMINI_URL = 'https://gemini.google.com/app';
 const STORAGE_KEY_TAB = 'prerenderTabId';
 const STORAGE_KEY_WINDOW = 'prerenderWindowId';
 
-let isCreating = false;
+// 使用内存变量 + storage 双保险，防止 service worker 重启时的竞态条件
+let isCreatingInProgress = false;
+let cachedPrerenderIds = { tabId: null, windowId: null };
 
 async function getPrerenderIds() {
+  // 优先使用缓存（内存操作，无竞态）
+  if (cachedPrerenderIds.tabId && cachedPrerenderIds.windowId) {
+    return cachedPrerenderIds;
+  }
+  // 缓存为空时从 storage 读取
   const result = await browser.storage.session.get([STORAGE_KEY_TAB, STORAGE_KEY_WINDOW]);
-  return {
+  cachedPrerenderIds = {
     tabId: result[STORAGE_KEY_TAB] || null,
     windowId: result[STORAGE_KEY_WINDOW] || null
   };
+  return cachedPrerenderIds;
 }
 
 async function setPrerenderIds(tabId, windowId) {
+  cachedPrerenderIds = { tabId, windowId };
   const data = {};
   if (tabId !== null) data[STORAGE_KEY_TAB] = tabId;
   if (windowId !== null) data[STORAGE_KEY_WINDOW] = windowId;
@@ -26,6 +35,7 @@ async function setPrerenderIds(tabId, windowId) {
 }
 
 async function clearPrerenderIds() {
+  cachedPrerenderIds = { tabId: null, windowId: null };
   await browser.storage.session.remove([STORAGE_KEY_TAB, STORAGE_KEY_WINDOW]);
 }
 
@@ -51,27 +61,45 @@ async function createHiddenWindow() {
 
 async function createPrerenderTab() {
   if (!IS_CHROME) return;
-  if (isCreating) return;
-  isCreating = true;
-
-  try {
-    const { tabId, windowId } = await getPrerenderIds();
-
-    if (tabId && windowId) {
+  
+  // 使用内存锁 + 缓存检查，防止并发创建（解决 service worker 重启竞态）
+  if (isCreatingInProgress) {
+    // 如果正在创建中，检查缓存的 ID 是否已有效
+    const cached = await getPrerenderIds();
+    if (cached.tabId && cached.windowId) {
       try {
-        await browser.tabs.get(tabId);
-        await browser.windows.get(windowId);
-        return tabId;
+        await browser.tabs.get(cached.tabId);
+        await browser.windows.get(cached.windowId);
+        return cached.tabId;
       } catch {
-        await cleanupExistingWindow(windowId);
+        // 已失效，清理后继续
+        await cleanupExistingWindow(cached.windowId);
         await clearPrerenderIds();
       }
     }
+    return;
+  }
 
+  // 二次检查：验证缓存的预渲染窗口是否仍然有效
+  const { tabId, windowId } = await getPrerenderIds();
+  if (tabId && windowId) {
+    try {
+      await browser.tabs.get(tabId);
+      await browser.windows.get(windowId);
+      return tabId;
+    } catch {
+      // 窗口/标签页已不存在，清理
+      await cleanupExistingWindow(windowId);
+      await clearPrerenderIds();
+    }
+  }
+
+  isCreatingInProgress = true;
+  try {
     const result = await createHiddenWindow();
     return result.tabId;
   } finally {
-    isCreating = false;
+    isCreatingInProgress = false;
   }
 }
 
@@ -101,7 +129,8 @@ async function consumePrerenderTab() {
 
     await cleanupExistingWindow(windowId);
 
-    setTimeout(() => createPrerenderTab(), 500);
+    // 延迟创建新窗口，确保状态完全清理
+    setTimeout(() => createPrerenderTab(), 2000);
     return tabId;
   } catch {
     await cleanupExistingWindow(windowId);
@@ -113,16 +142,24 @@ browser.tabs.onRemoved.addListener(async (removedTabId) => {
   const { tabId, windowId } = await getPrerenderIds();
   if (removedTabId === tabId) {
     await clearPrerenderIds();
-    await cleanupExistingWindow(windowId);
-    setTimeout(() => createPrerenderTab(), 1000);
+    // 延迟创建新窗口，确保旧窗口完全清理
+    setTimeout(() => createPrerenderTab(), 2000);
   }
 });
 
 browser.windows.onRemoved.addListener(async (removedWindowId) => {
-  const { windowId } = await getPrerenderIds();
+  const { tabId, windowId } = await getPrerenderIds();
   if (removedWindowId === windowId) {
-    await clearPrerenderIds();
-    setTimeout(() => createPrerenderTab(), 1000);
+    // 只有当对应的标签页也已失效时才创建新的
+    try {
+      await browser.tabs.get(tabId);
+      // 标签页还存在，可能只是窗口被关闭了，标签页在别的窗口中
+      // 不需要立即创建新窗口，等标签页被关闭时再创建
+    } catch {
+      // 标签页也不存在了，可以创建新的
+      await clearPrerenderIds();
+      setTimeout(() => createPrerenderTab(), 2000);
+    }
   }
 });
 
